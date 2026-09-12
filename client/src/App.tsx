@@ -48,8 +48,92 @@ function App() {
     const navigate = (label: string) => { if (label === 'Projects' || label === 'Overview') setSelectedProject(''); setWorkspaceOpen(false); setHelpOpen(false); setProfileOpen(false); setActiveNav(label); announce(`${label} view selected`) }
     const cycleTaskStatus = (taskId: number) => { const current = taskItems.find((task) => task.id === taskId); if (!current) return; const nextStatus: Status = current.status === 'Done' ? 'To do' : 'Done'; setTaskItems((items) => items.map((task) => task.id === taskId ? { ...task, status: nextStatus } : task)); if (user) updateTaskStatus(taskId, nextStatus === 'Done' ? 'DONE' : 'TODO').catch(() => announce('Status saved in preview mode')) }
     useEffect(() => { refresh().then((session) => { if (session) setUser(session) }).catch(() => undefined) }, [])
-    useEffect(() => { if (!user) return; Promise.all([getTasks(), getActivity(), getNotifications()]).then(([remoteTasks]) => { if (remoteTasks.length) setTaskItems(remoteTasks.map((task) => ({ id: task.id, title: task.title, project: task.project.name, status: ({ TODO: 'To do', IN_PROGRESS: 'In progress', IN_REVIEW: 'In review', DONE: 'Done', OVERDUE: 'Overdue' } as Record<string, Status>)[task.status] ?? 'To do', priority: task.priority[0] + task.priority.slice(1).toLowerCase() as Priority, due: new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }))) }).catch(() => undefined); const socket = io(API_URL, { auth: { token: getAccessToken() } }); socket.on('activity:new', () => getActivity().catch(() => undefined)); socket.on('notification:new', () => getNotifications().catch(() => undefined)); socket.on('presence:count', () => undefined); return () => { socket.disconnect() } }, [user])
-    useEffect(() => { if (!user) return; const loadLiveData = async () => { const [remoteActivity, remoteNotifications] = await Promise.all([getActivity(), getNotifications()]); setFeedItems(remoteActivity.map((item) => [item.actor.name, item.actor.name.split(' ').map((part) => part[0]).join('').slice(0, 2), item.message, new Date(item.createdAt).toLocaleString(), 'blue'] as [string, string, string, string, string])); setNotificationItems(remoteNotifications) }; loadLiveData().catch(() => undefined); const socket = io(API_URL, { auth: { token: getAccessToken() } }); socket.on('activity:new', () => loadLiveData().catch(() => undefined)); socket.on('notification:new', () => loadLiveData().catch(() => undefined)); socket.on('presence:count', (count: number) => setPresenceCount(count)); return () => { socket.disconnect() } }, [user])
+    useEffect(() => {
+        if (!user) return
+
+        const loadData = async () => {
+            const [remoteTasks, remoteActivity, remoteNotifications] =
+                await Promise.all([
+                    getTasks(),
+                    getActivity(),
+                    getNotifications()
+                ])
+
+            setTaskItems(
+                remoteTasks.map((task) => ({
+                    id: task.id,
+                    title: task.title,
+                    project: task.project.name,
+
+                    status: ({
+                        TODO: 'To do',
+                        IN_PROGRESS: 'In progress',
+                        IN_REVIEW: 'In review',
+                        DONE: 'Done',
+                        OVERDUE: 'Overdue'
+                    } as Record<string, Status>)[task.status] ?? 'To do',
+
+                    priority:
+                        task.priority[0] +
+                        task.priority.slice(1).toLowerCase() as Priority,
+
+                    due: new Date(task.dueDate).toLocaleDateString(
+                        'en-US',
+                        {
+                            month: 'short',
+                            day: 'numeric'
+                        }
+                    )
+                }))
+            )
+
+            setFeedItems(
+                remoteActivity.map((item) => [
+                    item.actor.name,
+
+                    item.actor.name
+                        .split(' ')
+                        .map((part) => part[0])
+                        .join('')
+                        .slice(0, 2),
+
+                    item.message,
+
+                    new Date(item.createdAt).toLocaleString(),
+
+                    'blue'
+                ] as [string, string, string, string, string])
+            )
+
+            setNotificationItems(remoteNotifications)
+        }
+
+        loadData().catch(() => undefined)
+
+        const socket = io(API_URL, {
+            auth: {
+                token: getAccessToken()
+            }
+        })
+
+        socket.on('activity:new', () => {
+            loadData().catch(() => undefined)
+        })
+
+        socket.on('notification:new', () => {
+            getNotifications()
+                .then(setNotificationItems)
+                .catch(() => undefined)
+        })
+
+        socket.on('presence:count', (count: number) => {
+            setPresenceCount(count)
+        })
+
+        return () => {
+            socket.disconnect()
+        }
+    }, [user])
     void feedItems; void notificationItems; void presenceCount
     if (!user) return <LoginScreen form={loginForm} setForm={setLoginForm} error={loginError} onSubmit={async (event) => { event.preventDefault(); try { const session = await login(loginForm.email, loginForm.password); setUser(session); setLoginError('') } catch (error) { setLoginError(error instanceof Error ? error.message : 'Unable to sign in') } }} />
 
